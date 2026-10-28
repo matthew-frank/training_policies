@@ -746,6 +746,10 @@ This appendix illustrates the CLOSED division rule in <<Mathematical equivalence
 |Computing `(W·Hᵀ)(H·x)` from `W` at each step, with gradients flowing back through `H` to `W`
 |Training `W·Hᵀ` in place of `W`. This is equivalent under plain SGD, but changes the per-element second-moment estimates of Adam-family optimizers.
 
+|Orthogonal transformations in the weight-gradient computation
+|Applying `H` along the contraction (token) dimension of both inputs to the weight-gradient GEMM, `dW = (H·dY)ᵀ·(H·X)`, where `X` and `dY` are the layer's input activations and output gradients for the batch. The rotation cancels, so the optimizer receives the same `dW` in the original basis.
+|Applying a rotation that does not cancel, so that the optimizer receives a rotated gradient or updates a rotated parameter
+
 |Rounding, such as https://royalsocietypublishing.org/doi/epdf/10.1098/rsos.211631[`Stochastic rounding`]
 |Rounding activations, gradients, trainable parameters, or optimizer state to a pre-approved format, deterministically or stochastically
 |—
@@ -753,6 +757,10 @@ This appendix illustrates the CLOSED division rule in <<Mathematical equivalence
 |Loss scaling
 |Multiplying the loss by a constant and dividing the resulting gradients by the same constant
 |—
+
+|Dynamic loss scaling
+|Adjusting the loss scale during training, and skipping an optimizer step when the scaled gradients overflow. Overflow occurs only because of finite precision, so skipped steps are a finite-precision difference governed by <<Numerical formats>>.
+|Skipping or altering optimizer steps for reasons other than numerical overflow, such as skipping steps with unusually high loss, where the reference does not
 |===
 
 === Model and graph transformations
