@@ -165,7 +165,7 @@ CLOSED: Where these rules require a change to be _mathematically equivalent_ to 
 
 A mathematically equivalent change may alter how values are represented and computed, for example by reordering, fusing, eliminating, or recomputing operations, or by storing values in a different numerical format. It may not alter which tensors the optimizer updates. In particular, _reparameterizing_ the model is not allowed: the optimizer must not update a transformed version of a trainable parameter, such as `W/s` or `W·Hᵀ` in place of `W`, even though the function the model computes is unchanged. Reparameterization changes the gradients and therefore the training trajectory. For example, a fixed scale `s` acts as a learning rate change, and an orthogonal rotation `H` changes the per-element second-moment estimates of Adam-family optimizers.
 
-Differences that arise only from finite precision are governed by <<Numerical formats>>. Exemptions to mathematical equivalence are listed in <<Equivalence exceptions>>.
+Differences that arise only from finite precision are governed by <<Numerical formats>>. Exemptions to mathematical equivalence are listed in <<Equivalence exceptions>>. Examples of changes that are and are not mathematically equivalent are given in <<equivalence_examples,Appendix: Examples of Mathematical Equivalence>>.
 
 OPEN: Mathematical equivalence is not required.
 
@@ -196,16 +196,7 @@ OPEN: Any random number generation may be used. The seed is not expected to be l
 === Numerical formats
 CLOSED: The numerical formats fp64, fp32, tf32, fp16, fp8, mxfp6, nvfp4, mxfp4, bfloat16, Graphcore FLOAT 16.16, int8, uint8, int4, and uint4 are pre-approved for use. Additional formats require explicit approval. Any numerically safe techniques needed to compensate for different precision may be used. A technique is numerically safe if it is mathematically equivalent to the reference, as defined in <<Mathematical equivalence>>, so that it differs from the reference only because of finite precision.
 
-Some examples of numerically safe techniques that are allowed include but are not limited to:  
-
-* Scaling, such as per-tensor or per-block, of activations, gradients, or transient copies of weights
-* Orthogonal pre/post transformations, such as https://en.wikipedia.org/wiki/Hadamard_transform[`Hadamard Transforms`] around a linear operator, applied to the operator's operands
-* Rounding, such as https://royalsocietypublishing.org/doi/epdf/10.1098/rsos.211631[`Stochastic rounding`] 
-
-Some examples of techniques that are _not_ allowed under this rule: 
-
-* Normalization or gradient clipping different from the reference model 
-* Increasing the number of trainable parameters in the model 
+Examples of techniques that are and are not numerically safe are given in <<equivalence_examples,Appendix: Examples of Mathematical Equivalence>>.
 
 Techniques that are not numerically safe require explicit approval from the working group.
 
@@ -732,6 +723,87 @@ TODO: locate the document and provide working link
 |      |              	          | TensorFlow	| tf.train.MomentumOptimizer
 |      |              	          | MXNet	    | mx.optimizer.NAG
 |===
+
+[[equivalence_examples]]
+== Appendix: Examples of Mathematical Equivalence
+
+This appendix illustrates the CLOSED division rule in <<Mathematical equivalence>>. It is informative only: the definition in that section governs, and a technique is neither allowed nor disallowed merely because it does or does not appear here. Each row pairs a form of a technique that is mathematically equivalent to the reference with a related form that is not. In the examples, `W` is a trainable parameter, `x` is the input to the operator that uses `W`, `s` is a scale, and `H` is an orthogonal matrix.
+
+=== Numerical precision
+
+|===
+|Technique |Allowed (mathematically equivalent) |Not allowed (not mathematically equivalent)
+
+|Low-precision formats
+|Using pre-approved formats from <<Numerical formats>> for activations, gradients, trainable parameters, or optimizer state
+|—
+
+|Scaling, such as per-tensor or per-block
+|Scaling activations, gradients, or a copy of `W` made for computation, such as a quantized copy of `W` used as a GEMM operand, while the optimizer updates `W` itself
+|Training `W/s` in place of `W`, with `s` fixed. This changes the effective learning rate of `W` (by a factor of `s²` for SGD and approximately `s` for Adam).
+
+|Orthogonal pre/post transformations, such as https://en.wikipedia.org/wiki/Hadamard_transform[`Hadamard Transforms`] around a linear operator
+|Computing `(W·Hᵀ)(H·x)` from `W` at each step, with gradients flowing back through `H` to `W`
+|Training `W·Hᵀ` in place of `W`. This is equivalent under plain SGD, but changes the per-element second-moment estimates of Adam-family optimizers.
+
+|Rounding, such as https://royalsocietypublishing.org/doi/epdf/10.1098/rsos.211631[`Stochastic rounding`]
+|Rounding activations, gradients, trainable parameters, or optimizer state to a pre-approved format, deterministically or stochastically
+|—
+
+|Loss scaling
+|Multiplying the loss by a constant and dividing the resulting gradients by the same constant
+|—
+|===
+
+=== Model and graph transformations
+
+|===
+|Technique |Allowed (mathematically equivalent) |Not allowed (not mathematically equivalent)
+
+|Graph optimizations
+|Dead code elimination, common subexpression elimination, loop-invariant code motion, operator fusion, and reordering of operations
+|—
+
+|Activation recomputation
+|Recomputing activations during the backward pass instead of storing them
+|—
+
+|Normalization and gradient clipping
+|Implementing the reference's normalization and gradient clipping with fused or reordered operations
+|Normalization or gradient clipping different from the reference model
+
+|Folding normalization into adjacent layers
+|Folding normalization parameters into adjacent weights in a copy of the model used only for evaluation
+|Folding normalization parameters into adjacent weights and training the folded weights
+
+|Merging layers
+|—
+|Replacing consecutive linear layers `W2·(W1·x)` with a single trained matrix `W = W2·W1`
+
+|Model size
+|—
+|Increasing the number of trainable parameters in the model
+|===
+
+=== Parallelism and data layout
+
+|===
+|Technique |Allowed (mathematically equivalent) |Not allowed (not mathematically equivalent)
+
+|Distributing work
+|Sharding parameters, gradients, activations, or optimizer state across devices (for example data, tensor, pipeline, expert, or context parallelism), with the same global batch and synchronous updates
+|Using stale or asynchronously updated weights or gradients, unless the reference or the benchmark-specific rules do the same
+
+|Gradient accumulation
+|Summing gradients over micro-batches that together form the reference's global batch
+|—
+
+|Data layout
+|Transposing, padding, or tiling stored tensors; storing optimizer state in rescaled form, with the scale undone before use
+|—
+|===
+
+Some techniques that are not mathematically equivalent are nevertheless permitted, such as distributed batch normalization and approved methods for placing Adam's epsilon. These are listed in <<Equivalence exceptions>> and are not repeated here.
 
 == Appendix: v0.7 Specific Rules
 
