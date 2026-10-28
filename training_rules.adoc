@@ -163,7 +163,7 @@ Open division benchmarks must be referred to using the benchmark name plus the t
 === Mathematical equivalence
 CLOSED: Where these rules require a change to be _mathematically equivalent_ to the reference, the change must leave the _training trajectory_ unchanged in exact (infinite-precision) arithmetic. That is, if the implementation and the reference were both computed in exact arithmetic, from the same initial values, on the same data in the same order, and with the same random numbers, every trainable parameter of the model (weights, biases, normalization scales and shifts, embeddings, etc.) would take the same sequence of values in the implementation as in the reference.
 
-A mathematically equivalent change may alter how values are represented and computed, for example by reordering, fusing, eliminating, or recomputing operations, or by storing values in a different numerical format. It may not alter which tensors the optimizer updates. In particular, _reparameterizing_ the model is not allowed: the optimizer must not update a transformed version of a trainable parameter, such as `W/s` or `W·Hᵀ` in place of `W`, even though the function the model computes is unchanged. Reparameterization changes the gradients and therefore the training trajectory. For example, a fixed scale `s` acts as a learning rate change, and an orthogonal rotation `H` changes the per-element second-moment estimates of Adam-family optimizers.
+The trainable parameters are the abstract tensors of the reference model, not their physical representation. An implementation may store them in any form, for example in a different numerical format, scaled, rotated, transposed, padded, or sharded across devices, and may reorder, fuse, eliminate, or recompute operations, provided the trajectory of the abstract tensors is unchanged. A _reparameterization_, in which the optimizer computes its update for a transformed version of a parameter rather than for the parameter itself, generally changes the trajectory even when the function the model computes is unchanged, because optimizers are not invariant to changes of coordinates.
 
 Differences that arise only from finite precision are governed by <<Numerical formats>>. Exemptions to mathematical equivalence are listed in <<Equivalence exceptions>>. Examples of changes that are and are not mathematically equivalent are given in <<equivalence_examples,Appendix: Examples of Mathematical Equivalence>>.
 
@@ -729,6 +729,8 @@ TODO: locate the document and provide working link
 
 This appendix illustrates the CLOSED division rule in <<Mathematical equivalence>>. It is informative only: the definition in that section governs, and a technique is neither allowed nor disallowed merely because it does or does not appear here. Each row pairs a form of a technique that is mathematically equivalent to the reference with a related form that is not. In the examples, `W` is a trainable parameter, `x` is the input to the operator that uses `W`, `s` is a scale, and `H` is an orthogonal matrix.
 
+Gradient-based optimizers are not invariant to changes of coordinates. Computing the update for `W/s` instead of `W` changes the effective learning rate of `W`, and computing an Adam-family update for `W·Hᵀ` instead of `W` changes its per-element second-moment estimates (plain SGD is invariant to orthogonal transformations). What matters is therefore the coordinates in which the optimizer computes its update, not how the parameter is stored.
+
 === Numerical precision
 
 |===
@@ -739,16 +741,16 @@ This appendix illustrates the CLOSED division rule in <<Mathematical equivalence
 |—
 
 |Scaling, such as per-tensor or per-block
-|Scaling activations, gradients, or a copy of `W` made for computation, such as a quantized copy of `W` used as a GEMM operand, while the optimizer updates `W` itself
-|Training `W/s` in place of `W`, with `s` fixed. This changes the effective learning rate of `W` (by a factor of `s²` for SGD and approximately `s` for Adam).
+|Scaling activations, gradients, or a copy of `W` made for computation, such as a quantized copy of `W` used as a GEMM operand. Storing `W` as `W/s` is also allowed, provided the optimizer update is computed for `W`.
+|Computing the optimizer update for `W/s` as if it were the parameter, with `s` fixed. This changes the effective learning rate of `W` (by a factor of `s²` for SGD and approximately `s` for Adam).
 
 |Orthogonal pre/post transformations, such as https://en.wikipedia.org/wiki/Hadamard_transform[`Hadamard Transforms`] around a linear operator
-|Computing `(W·Hᵀ)(H·x)` from `W` at each step, with gradients flowing back through `H` to `W`
-|Training `W·Hᵀ` in place of `W`. This is equivalent under plain SGD, but changes the per-element second-moment estimates of Adam-family optimizers.
+|Computing `(W·Hᵀ)(H·x)` from `W` at each step, with gradients flowing back through `H` to `W`. Storing `W` as `W·Hᵀ` is also allowed, provided the optimizer update is computed for `W`, for example by un-rotating, updating, and re-rotating.
+|Computing an Adam-family optimizer update for `W·Hᵀ` as if it were the parameter. This changes the per-element second-moment estimates. (Under plain SGD the same transformation leaves the trajectory unchanged, and is therefore equivalent.)
 
 |Orthogonal transformations in the weight-gradient computation
 |Applying `H` along the contraction (token) dimension of both inputs to the weight-gradient GEMM, `dW = (H·dY)ᵀ·(H·X)`, where `X` and `dY` are the layer's input activations and output gradients for the batch. The rotation cancels, so the optimizer receives the same `dW` in the original basis.
-|Applying a rotation that does not cancel, so that the optimizer receives a rotated gradient or updates a rotated parameter
+|Applying a rotation that does not cancel, so that the optimizer computes its update from a rotated gradient
 
 |Rounding, such as https://royalsocietypublishing.org/doi/epdf/10.1098/rsos.211631[`Stochastic rounding`]
 |Rounding activations, gradients, trainable parameters, or optimizer state to a pre-approved format, deterministically or stochastically
